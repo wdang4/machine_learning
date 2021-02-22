@@ -1,0 +1,115 @@
+---
+title: "wearable devices"
+author: "me"
+date: "2/22/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+setup environment and load data
+
+```{r}
+library(caret)
+library(e1071)
+library(randomForest)
+library(psych)
+library(gbm)
+
+train_data <- read.csv('pml-training.csv')
+test_data <- read.csv('pml-testing.csv')
+```
+
+preprocessing
+
+- remove columns that do not pertain to exercise
+
+```{r}
+scoped_train <- train_data[,-1:-7]
+scoped_test <- test_data[,-1:-7]
+```
+
+split data for train and test
+
+```{r}
+set.seed(1)
+train_idx <- createDataPartition(scoped_train$classe, p = 0.7, list = FALSE)
+validate_df <- scoped_train[-train_idx, ]
+training_df <- scoped_train[train_idx, ]
+```
+
+remove near zero var
+
+```{r}
+nzv <- nearZeroVar(training_df, saveMetrics = T)
+features_to_keep <- row.names(nzv[nzv$nzv == FALSE, ])
+training_df <- training_df[, features_to_keep]
+```
+
+remove all na
+
+```{r}
+training_df <- training_df[, colSums(is.na(training_df)) == 0]
+```
+
+apply pca to reduce dimension
+
+```{r}
+fa.parallel(training_df[,1:52], main="Scree plot with parallel analysis")
+```
+
+remove factors with eigenvalues < 1
+
+```{r}
+pca_scope <- preProcess(training_df[,1:52], method = "pca", pcaComp = 13)
+train_to_model <- predict(pca_scope, training_df)
+test_to_model <- predict(pca_scope, validate_df)
+```
+
+fit random forest model
+
+```{r}
+start_time <- Sys.time()
+set.seed(123)
+rf_model <- train(classe ~. , data = train_to_model, method = 'rf', nodesize = 7, ntree = 30)
+end_time <- Sys.time()
+end_time - start_time
+```
+
+predict with validation set
+
+```{r}
+rf_preds <- predict(rf_model, newdata = test_to_model)
+confusionMatrix(rf_preds,as.factor(test_to_model$classe))$overall[1]
+```
+
+fit gradient boosted model
+
+```{r}
+start_time <- Sys.time()
+gbm_model <- train(classe ~., data = train_to_model, method = 'gbm', tuneGrid = expand.grid(
+  n.trees = 100, 
+  interaction.depth = 1, 
+  shrinkage = .1,
+  n.minobsinnode = 10),
+  verbose = F)
+end_time <- Sys.time()
+end_time - start_time
+```
+
+predict with validation set
+
+```{r}
+gbm_preds <- predict(gbm_model, newdata = test_to_model)
+confusionMatrix(gbm_preds,as.factor(test_to_model$classe))$overall[1]
+```
+
+predict test using best model (random forest)
+
+```{r}
+test_final <- predict(pca_scope, scoped_test)
+predict(rf_model, newdata = test_final)
+```
+
+
